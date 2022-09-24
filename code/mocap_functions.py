@@ -237,3 +237,125 @@ def train_validate_test_model(model, optimizer, criterion, max_epochs, training_
     'min_test_loss':min_test_loss, 'min_test_std':min_test_std,
     'train_loss_array':train_loss_array, 'validation_loss_array':validation_loss_array, 'test_loss_array':test_loss_array, 'max_epochs':max_epochs}
     return loss_dict
+
+
+#Dataset class to handle mocap dataframes from SEE project
+class SEE_Dataset(torch.utils.data.Dataset):
+    #'Characterizes a dataset for PyTorch'
+    def __init__(self, cv_dict, fold, partition, kinematic_df, neural_df, offset, window_size, data_step_size, device, kinematic_type='posData', scale_data=True, flip_outputs=False):
+        #'Initialization'
+        self.cv_dict = cv_dict
+        self.fold = fold
+        self.flip_outputs = flip_outputs
+        self.partition = partition
+        self.trial_idx = cv_dict[fold][partition]
+        self.num_trials = len(self.trial_idx) 
+        self.offset = offset
+        self.window_size = window_size
+        self.data_step_size = data_step_size
+        self.device = device
+        self.posData_list, self.neuralData_list = self.process_dfs(kinematic_df, neural_df)
+        if scale_data:
+            self.posData_list = self.transform_data(self.posData_list)
+            self.neuralData_list = self.transform_data(self.neuralData_list)
+
+        self.kinematic_type = kinematic_type
+        self.split_offset = np.round(self.offset/self.data_step_size).astype(int)
+
+        self.X_tensor, self.y_tensor = self.load_splits()
+        self.num_samples = np.sum(self.X_tensor.size(0))
+
+    def __len__(self):
+        #'Denotes the total number of samples'
+        return self.num_samples
+
+    def __getitem__(self, slice_index):
+        if self.flip_outputs:
+            return self.y_tensor[slice_index,:,:], self.X_tensor[slice_index,:,:]
+        else:
+            return self.X_tensor[slice_index,:,:], self.y_tensor[slice_index,:,:]
+
+    #**add functionality to separate eye, object, and body markers
+    def process_dfs(self, kinematic_df, neural_df):
+        posData_list, neuralData_list = [], []
+        for trial in self.trial_idx:
+            posData_array = np.stack(kinematic_df['posData'][kinematic_df['trial'] == trial].values).transpose() 
+            neuralData_array = np.stack(neural_df['rates'][neural_df['trial'] == trial].values).squeeze().transpose() 
+
+            posData_list.append(posData_array)
+            neuralData_list.append(neuralData_array)
+
+        return posData_list, neuralData_list
+
+    def format_splits(self, data_list):
+        data_tensor = torch.from_numpy(
+            np.concatenate(
+                [np.pad(data_list[trial], ((self.window_size,self.window_size),(0,0)), mode='constant') for trial in range(self.num_trials)]
+                )  
+            ).unfold(0, self.window_size, self.data_step_size).transpose(1,2)
+
+        return data_tensor
+    
+    def load_splits(self):
+        y_tensor = self.format_splits(self.neuralData_list)
+
+        if self.kinematic_type == 'posData':
+            X_tensor = self.format_splits(self.posData_list)
+        # elif self.kinematic_type == 'both':
+        #     y1 = self.format_splits(self.rotData_list)
+        #     y2 = self.format_splits(self.posData_list)
+        #     y_tensor = torch.stack([y1, y2], dim=2)
+
+        X_tensor, y_tensor = X_tensor[:-self.split_offset,::self.data_step_size,:], y_tensor[self.split_offset:,::self.data_step_size,:]
+        assert X_tensor.shape[0] == y_tensor.shape[0]
+        return X_tensor, y_tensor
+
+    #Zero mean and unit std
+    def transform_data(self, data_list):
+        #Iterate over trials and apply normalization
+        # np.mean(np.concatenate(data_list),0)
+        # np.std(np.concatenate(data_list),0)
+        scaled_data_list = []
+        for data_trial in data_list:
+            scaled_data_trial = scaler.fit_transform(data_trial)
+            scaled_data_list.append(scaled_data_trial)
+
+        return scaled_data_list
+
+# Utility function to load dataframes of preprocessed kinematic/neural data
+def load_mocap_df(data_path):
+    kinematic_df = pd.read_pickle(data_path + 'kinematic_df.pkl')
+    neural_df = pd.read_pickle(data_path + 'neural_df.pkl')
+
+    # read python dict back from the file
+    metadata_file = open(data_path + 'metadata.pkl', 'rb')
+    metadata = pickle.load(metadata_file)
+    metadata_file.close()
+
+    return kinematic_df, neural_df, metadata
+
+
+#Vectorized correlation coefficient of two matrices on specified dimension
+def matrix_corr(x, y, axis=0):
+    num_tpts, _ = np.shape(x)
+    mean_x, mean_y = np.tile(np.mean(x, axis=axis), [num_tpts,1]), np.tile(np.mean(y, axis=axis), [num_tpts,1])
+    corr = np.sum(np.multiply((x-mean_x), (y-mean_y)), axis=axis) / np.sqrt(np.multiply( np.sum((x-mean_x)**2, axis=axis), np.sum((y-mean_y)**2, axis=axis) ))
+    return corr
+
+#Helper function to evaluate decoding performance on a trained model
+def evaluate_model(model, generator, device):
+    #Run model through test set
+    with torch.no_grad():
+        model.eval()
+        #Generate train set predictions
+        y_pred_tensor = torch.zeros(len(generator.dataset),  generator.dataset[0][1].shape[1])
+        batch_idx = 0
+        for batch_x, batch_y in generator:
+            batch_x = batch_x.float().to(device)
+            batch_y = batch_y.float().to(device)
+            output = model(batch_x)
+            y_pred_tensor[batch_idx:(batch_idx+output.size(0)),:] = output[:,-1,:]
+            batch_idx += output.size(0)
+
+    y_pred = y_pred_tensor.detach().cpu().numpy()
+    return y_pred
