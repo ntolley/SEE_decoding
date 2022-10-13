@@ -42,6 +42,102 @@ class model_ann(nn.Module):
 
         return x
 
+
+#LSTM/GRU architecture for decoding
+class model_lstm(nn.Module):
+    def __init__(self, input_size, output_size, hidden_dim, n_layers, dropout, device, bidirectional=False):
+        super(model_lstm, self).__init__()
+
+        #multiplier based on bidirectional parameter
+        if bidirectional:
+            num_directions = 2
+        else:
+            num_directions = 1
+
+        # Defining some parameters
+        self.hidden_dim = hidden_dim
+        self.n_layers = n_layers * num_directions
+        self.device = device
+        self.dropout = dropout
+        self.bidirectional = bidirectional
+
+        #Defining the layers
+        # LSTM Layer
+        self.lstm = nn.LSTM(input_size, hidden_dim, n_layers, batch_first=True, dropout=dropout)   
+
+        # Fully connected layer
+        self.fc = nn.Linear(hidden_dim*num_directions, output_size)
+    
+    def forward(self, x):
+        batch_size = x.size(0)
+        # Initializing hidden state for first input using method defined below
+        hidden = self.init_hidden(batch_size)
+        # Passing in the input and hidden state into the model and obtaining outputs
+        out, hidden = self.lstm(x, hidden)
+        
+        # Reshaping the outputs such that it can be fit into the fully connected layer
+        out = out.contiguous()
+        out = self.fc(out)
+        return out
+    
+    def init_hidden(self, batch_size):
+        # This method generates the first hidden state of zeros which we'll use in the forward pass
+        weight = next(self.parameters()).data.to(self.device)
+
+        # LSTM cell initialization
+        hidden = (weight.new(self.n_layers, batch_size, self.hidden_dim).zero_().to(self.device),
+                      weight.new(self.n_layers, batch_size, self.hidden_dim).zero_().to(self.device))
+    
+
+        return hidden
+
+
+#GRU architecture for decoding kinematics
+class model_gru(nn.Module):
+    def __init__(self, input_size, output_size, hidden_dim, n_layers, dropout, device, bidirectional=False):
+        super(model_gru, self).__init__()
+
+        #multiplier based on bidirectional parameter
+        if bidirectional:
+            num_directions = 2
+        else:
+            num_directions = 1
+
+        # Defining some parameters
+        self.hidden_dim = hidden_dim
+        self.n_layers = n_layers * num_directions
+        self.device = device
+        self.dropout = dropout
+        self.bidirectional = bidirectional
+
+        #Defining the layers
+        self.gru = nn.GRU(input_size, hidden_dim, n_layers, batch_first=True, dropout=dropout, bidirectional=bidirectional)   
+
+        # Fully connected layer
+        self.fc = nn.Linear(hidden_dim*num_directions, output_size)
+    
+    def forward(self, x):
+        batch_size = x.size(0)
+        # Initializing hidden state for first input using method defined below
+        hidden = self.init_hidden(batch_size)
+        # Passing in the input and hidden state into the model and obtaining outputs
+        out, hidden = self.gru(x, hidden)
+        
+        # Reshaping the outputs such that it can be fit into the fully connected layer
+        out = out.contiguous()
+        out = self.fc(out)
+        return out
+    
+    def init_hidden(self, batch_size):
+        # This method generates the first hidden state of zeros which we'll use in the forward pass
+        weight = next(self.parameters()).data.to(self.device)
+
+        #GRU initialization
+        hidden = weight.new(self.n_layers, batch_size, self.hidden_dim).zero_().to(self.device)
+
+        return hidden
+
+
 #Helper function to pytorch train networks for decoding
 def train_model(model, optimizer, criterion, max_epochs, training_generator, device, print_freq=10):
     train_loss_array = []
