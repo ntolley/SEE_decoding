@@ -338,7 +338,8 @@ def train_validate_test_model(model, optimizer, criterion, max_epochs, training_
 #Dataset class to handle mocap dataframes from SEE project
 class SEE_Dataset(torch.utils.data.Dataset):
     #'Characterizes a dataset for PyTorch'
-    def __init__(self, cv_dict, fold, partition, kinematic_df, neural_df, offset, window_size, data_step_size, device, kinematic_type='posData', scale_data=True, flip_outputs=False):
+    def __init__(self, cv_dict, fold, partition, kinematic_df, neural_df, offset, window_size, data_step_size, device, kinematic_type='posData', scale_data=True, flip_outputs=False,
+                 exclude_neural=None, exclude_kinematic=None):
         #'Initialization'
         self.cv_dict = cv_dict
         self.fold = fold
@@ -351,9 +352,10 @@ class SEE_Dataset(torch.utils.data.Dataset):
         self.data_step_size = data_step_size
         self.device = device
         self.posData_list, self.neuralData_list = self.process_dfs(kinematic_df, neural_df)
+        # Boolean array of 1's for features to not be scaled
         if scale_data:
-            self.posData_list = self.transform_data(self.posData_list)
-            self.neuralData_list = self.transform_data(self.neuralData_list)
+            self.posData_list = self.transform_data(self.posData_list, exclude_kinematic)
+            self.neuralData_list = self.transform_data(self.neuralData_list, exclude_neural)
 
         self.kinematic_type = kinematic_type
         self.split_offset = np.round(self.offset/self.data_step_size).astype(int)
@@ -407,13 +409,19 @@ class SEE_Dataset(torch.utils.data.Dataset):
         return X_tensor, y_tensor
 
     #Zero mean and unit std
-    def transform_data(self, data_list):
+    def transform_data(self, data_list, exclude_processing):
         #Iterate over trials and apply normalization
         # np.mean(np.concatenate(data_list),0)
         # np.std(np.concatenate(data_list),0)
         scaled_data_list = []
         for data_trial in data_list:
-            scaled_data_trial = scaler.fit_transform(data_trial)
+            if exclude_processing is None:
+                scaled_data_trial = scaler.fit_transform(data_trial)
+            else: 
+                scaled_data_trial = np.zeros(data_trial.shape)
+                scaled_data_trial[:, exclude_processing] = data_trial[:, exclude_processing]
+                processed_data = scaler.fit_transform(data_trial[~exclude_processing])
+                scaled_data_trial[:, ~exclude_processing] = processed_data
             scaled_data_list.append(scaled_data_trial)
 
         return scaled_data_list
