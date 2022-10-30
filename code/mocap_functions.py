@@ -420,7 +420,7 @@ class SEE_Dataset(torch.utils.data.Dataset):
             else: 
                 scaled_data_trial = np.zeros(data_trial.shape)
                 scaled_data_trial[:, exclude_processing] = data_trial[:, exclude_processing]
-                processed_data = scaler.fit_transform(data_trial[~exclude_processing])
+                processed_data = scaler.fit_transform(data_trial[:, ~exclude_processing])
                 scaled_data_trial[:, ~exclude_processing] = processed_data
             scaled_data_list.append(scaled_data_trial)
 
