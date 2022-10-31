@@ -94,7 +94,8 @@ class model_lstm(nn.Module):
 
 #GRU architecture for decoding kinematics
 class model_gru(nn.Module):
-    def __init__(self, input_size, output_size, hidden_dim, n_layers, dropout, device, bidirectional=False):
+    def __init__(self, input_size, output_size, hidden_dim, n_layers, dropout, device, bidirectional=False,
+                 cat_features=None):
         super(model_gru, self).__init__()
 
         #multiplier based on bidirectional parameter
@@ -104,7 +105,11 @@ class model_gru(nn.Module):
             num_directions = 1
 
         # Defining some parameters
-        self.hidden_dim = hidden_dim
+        if cat_features is not None:
+            self.hidden_dim = hidden_dim + np.sum(cat_features)
+        else:
+            self.hidden_dim = hidden_dim
+
         self.n_layers = n_layers * num_directions
         self.device = device
         self.dropout = dropout
@@ -125,6 +130,7 @@ class model_gru(nn.Module):
         
         # Reshaping the outputs such that it can be fit into the fully connected layer
         out = out.contiguous()
+        out = torch.vstack()
         out = self.fc(out)
         return out
     
