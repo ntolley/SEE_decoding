@@ -130,7 +130,7 @@ class model_gru(nn.Module):
         
         # Reshaping the outputs such that it can be fit into the fully connected layer
         out = out.contiguous()
-        out = torch.vstack()
+        out = torch.hstack()
         out = self.fc(out)
         return out
     
@@ -417,8 +417,7 @@ class SEE_Dataset(torch.utils.data.Dataset):
     #Zero mean and unit std
     def transform_data(self, data_list, exclude_processing):
         #Iterate over trials and apply normalization
-        # np.mean(np.concatenate(data_list),0)
-        # np.std(np.concatenate(data_list),0)
+     
         scaled_data_list = []
         for data_trial in data_list:
             if exclude_processing is None:
