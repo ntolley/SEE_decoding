@@ -374,10 +374,7 @@ class SEE_Dataset(torch.utils.data.Dataset):
         return self.num_samples
 
     def __getitem__(self, slice_index):
-        if self.flip_outputs:
-            return self.y_tensor[slice_index,:,:], self.X_tensor[slice_index,:,:]
-        else:
-            return self.X_tensor[slice_index,:,:], self.y_tensor[slice_index,:,:]
+        return self.X_tensor[slice_index,:,:], self.y_tensor[slice_index,:,:]
 
     #**add functionality to separate eye, object, and body markers
     def process_dfs(self, kinematic_df, neural_df):
@@ -401,10 +398,12 @@ class SEE_Dataset(torch.utils.data.Dataset):
         return data_tensor
     
     def load_splits(self):
-        y_tensor = self.format_splits(self.neuralData_list)
-
-        if self.kinematic_type == 'posData':
+        if not self.flip_outputs:
             X_tensor = self.format_splits(self.posData_list)
+            y_tensor = self.format_splits(self.neuralData_list)
+        else:
+            y_tensor = self.format_splits(self.posData_list)
+            X_tensor = self.format_splits(self.neuralData_list)
         # elif self.kinematic_type == 'both':
         #     y1 = self.format_splits(self.rotData_list)
         #     y2 = self.format_splits(self.posData_list)
