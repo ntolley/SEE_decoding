@@ -344,7 +344,8 @@ def train_validate_test_model(model, optimizer, criterion, max_epochs, training_
 #Dataset class to handle mocap dataframes from SEE project
 class SEE_Dataset(torch.utils.data.Dataset):
     #'Characterizes a dataset for PyTorch'
-    def __init__(self, cv_dict, fold, partition, kinematic_df, neural_df, offset, window_size, data_step_size, device, kinematic_type='posData', scale_data=True, flip_outputs=False,
+    def __init__(self, cv_dict, fold, partition, kinematic_df, neural_df, offset, window_size, data_step_size, device,
+                 kinematic_type='posData', scale_neural=True, scale_kinematics=True, flip_outputs=False,
                  exclude_neural=None, exclude_kinematic=None):
         #'Initialization'
         self.cv_dict = cv_dict
@@ -359,12 +360,14 @@ class SEE_Dataset(torch.utils.data.Dataset):
         self.device = device
         self.posData_list, self.neuralData_list = self.process_dfs(kinematic_df, neural_df)
         # Boolean array of 1's for features to not be scaled
-        if scale_data:
+        if scale_kinematics:
             self.posData_list = self.transform_data(self.posData_list, exclude_kinematic)
+        
+        if scale_neural:
             self.neuralData_list = self.transform_data(self.neuralData_list, exclude_neural)
 
         self.kinematic_type = kinematic_type
-        self.split_offset = np.round(self.offset/self.data_step_size).astype(int)
+        self.split_offset = np.round((self.offset/self.data_step_size) / 2).astype(int)
 
         self.X_tensor, self.y_tensor = self.load_splits()
         self.num_samples = np.sum(self.X_tensor.size(0))
@@ -389,11 +392,18 @@ class SEE_Dataset(torch.utils.data.Dataset):
         return posData_list, neuralData_list
 
     def format_splits(self, data_list):
-        data_tensor = torch.from_numpy(
-            np.concatenate(
-                [np.pad(data_list[trial], ((self.window_size,self.window_size),(0,0)), mode='constant') for trial in range(self.num_trials)]
-                )  
-            ).unfold(0, self.window_size, self.data_step_size).transpose(1,2)
+        # data_tensor = torch.from_numpy(
+        #     np.concatenate(
+        #         [np.pad(data_list[trial], ((self.window_size, self.window_size),(0,0)), mode='constant') for trial in range(self.num_trials)]
+        #         )  
+        #     ).unfold(0, self.window_size, self.data_step_size).transpose(1,2)
+
+        unfolded_data_list = list()
+        for trial_idx in range(self.num_trials):
+            unfolded_trial = torch.from_numpy(data_list[trial_idx]).unfold(0, self.window_size, self.data_step_size).transpose(1, 2)
+            unfolded_data_list.append(unfolded_trial)
+        
+        data_tensor = torch.concat(unfolded_data_list, axis=0)
 
         return data_tensor
     
@@ -404,10 +414,6 @@ class SEE_Dataset(torch.utils.data.Dataset):
         else:
             y_tensor = self.format_splits(self.posData_list)
             X_tensor = self.format_splits(self.neuralData_list)
-        # elif self.kinematic_type == 'both':
-        #     y1 = self.format_splits(self.rotData_list)
-        #     y2 = self.format_splits(self.posData_list)
-        #     y_tensor = torch.stack([y1, y2], dim=2)
 
         X_tensor, y_tensor = X_tensor[:-self.split_offset,::self.data_step_size,:], y_tensor[self.split_offset:,::self.data_step_size,:]
         assert X_tensor.shape[0] == y_tensor.shape[0]
@@ -455,7 +461,7 @@ def evaluate_model(model, generator, device):
     #Run model through test set
     with torch.no_grad():
         model.eval()
-        #Generate train set predictions
+        #Generate predictions
         y_pred_tensor = torch.zeros(len(generator.dataset),  generator.dataset[0][1].shape[1])
         batch_idx = 0
         for batch_x, batch_y in generator:
@@ -467,3 +473,49 @@ def evaluate_model(model, generator, device):
 
     y_pred = y_pred_tensor.detach().cpu().numpy()
     return y_pred
+
+def make_generators(pred_df, neural_df, neural_offset, cv_dict, metadata,
+                    exclude_neural=None, exclude_kinematics=None, window_size=1, device='cpu'):
+    sampling_rate = 100
+    kernel_offset = int(metadata['kernel_halfwidth'] * sampling_rate)  #Convolution kernel centered at zero, add to neural offset
+    offset = neural_offset + kernel_offset
+    data_step_size = 1 
+
+    # Set up PyTorch Dataloaders
+    fold=3
+    
+    # Parameters
+    batch_size = 10000
+    train_params = {'batch_size': batch_size, 'shuffle': True, 'num_workers': num_cores, 'pin_memory':False}
+    train_eval_params = {'batch_size': batch_size, 'shuffle': False, 'num_workers': num_cores, 'pin_memory':False}
+    validation_params = {'batch_size': batch_size, 'shuffle': True, 'num_workers': num_cores, 'pin_memory':False}
+    test_params = {'batch_size': batch_size, 'shuffle': False, 'num_workers': num_cores, 'pin_memory':False}
+
+    scale_neural = True
+    scale_kinematics = False
+    flip_outputs=True
+
+    # Generators
+    training_set = SEE_Dataset(cv_dict, fold, 'train_idx', pred_df, neural_df, offset, window_size, 
+                               data_step_size, device, 'posData', scale_neural=scale_neural,
+                               scale_kinematics=scale_kinematics, flip_outputs=flip_outputs,
+                               exclude_neural=exclude_neural, exclude_kinematic=exclude_kinematics)
+    training_generator = torch.utils.data.DataLoader(training_set, **train_params)
+    training_eval_generator = torch.utils.data.DataLoader(training_set, **train_eval_params)
+
+    validation_set = SEE_Dataset(cv_dict, fold, 'validation_idx', pred_df, neural_df, offset, window_size, 
+                                 data_step_size, device, 'posData', scale_neural=scale_neural,
+                                 scale_kinematics=scale_kinematics, flip_outputs=flip_outputs,
+                                 exclude_neural=exclude_neural, exclude_kinematic=exclude_kinematics)
+    validation_generator = torch.utils.data.DataLoader(validation_set, **validation_params)
+
+    testing_set = SEE_Dataset(cv_dict, fold, 'test_idx', pred_df, neural_df, offset, window_size, 
+                              data_step_size, device, 'posData', scale_neural=scale_neural,
+                              scale_kinematics=scale_kinematics, flip_outputs=flip_outputs,
+                              exclude_neural=exclude_neural, exclude_kinematic=exclude_kinematics)
+    testing_generator = torch.utils.data.DataLoader(testing_set, **test_params)
+
+    data_arrays = (training_set, validation_set, testing_set)
+    generators = (training_generator, training_eval_generator, validation_generator, testing_generator)
+
+    return data_arrays, generators 
