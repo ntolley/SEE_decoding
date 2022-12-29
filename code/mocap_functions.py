@@ -492,7 +492,7 @@ def make_generators(pred_df, neural_df, neural_offset, cv_dict, metadata,
     test_params = {'batch_size': batch_size, 'shuffle': False, 'num_workers': num_cores, 'pin_memory':False}
 
     scale_neural = True
-    scale_kinematics = False
+    scale_kinematics = True
     flip_outputs=True
 
     # Generators
