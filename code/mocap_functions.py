@@ -19,7 +19,6 @@ import torch.nn.functional as F
 import multiprocessing
 from joblib import Parallel, delayed
 import pickle
-scaler = StandardScaler()
 num_cores = multiprocessing.cpu_count()
 
 #Simple feedforward ANN for decoding kinematics
@@ -346,7 +345,7 @@ class SEE_Dataset(torch.utils.data.Dataset):
     #'Characterizes a dataset for PyTorch'
     def __init__(self, cv_dict, fold, partition, kinematic_df, neural_df, offset, window_size, data_step_size, device,
                  kinematic_type='posData', scale_neural=True, scale_kinematics=True, flip_outputs=False,
-                 exclude_neural=None, exclude_kinematic=None):
+                 exclude_neural=None, exclude_kinematic=None, scaler=None):
         #'Initialization'
         self.cv_dict = cv_dict
         self.fold = fold
@@ -359,6 +358,11 @@ class SEE_Dataset(torch.utils.data.Dataset):
         self.data_step_size = data_step_size
         self.device = device
         self.posData_list, self.neuralData_list = self.process_dfs(kinematic_df, neural_df)
+        if scaler is None:
+            scaler = StandardScaler()
+
+        self.scaler = scaler
+
         # Boolean array of 1's for features to not be scaled
         if scale_kinematics:
             self.posData_list = self.transform_data(self.posData_list, exclude_kinematic)
@@ -426,11 +430,11 @@ class SEE_Dataset(torch.utils.data.Dataset):
         scaled_data_list = []
         for data_trial in data_list:
             if exclude_processing is None:
-                scaled_data_trial = scaler.fit_transform(data_trial)
-            else: 
+                scaled_data_trial = self.scaler.fit_transform(data_trial)
+            else:
                 scaled_data_trial = np.zeros(data_trial.shape)
                 scaled_data_trial[:, exclude_processing] = data_trial[:, exclude_processing]
-                processed_data = scaler.fit_transform(data_trial[:, ~exclude_processing])
+                processed_data = self.scaler.fit_transform(data_trial[:, ~exclude_processing])
                 scaled_data_trial[:, ~exclude_processing] = processed_data
             scaled_data_list.append(scaled_data_trial)
 
@@ -519,3 +523,39 @@ def make_generators(pred_df, neural_df, neural_offset, cv_dict, metadata,
     generators = (training_generator, training_eval_generator, validation_generator, testing_generator)
 
     return data_arrays, generators 
+
+def st_window_split(st_data, event_times, wstart, wstop, shift=True):
+    """ Extract windows from continuous data centered at event_times
+    Parameters
+    ----------
+    data : array like of float (2 dimensions)
+        Data to be split into windows. Recording channels correspond to rows (dim=0),
+        columns (dim=1) correspond to times.
+    event_times : array like of float (1 dimension)
+        Position where windows are centered.
+    wstart : float
+        Start time for window centered at event_times.
+    wstop : float
+        End time for window centered at event_times.
+    shift : bool
+        Option to substract the window start time for each trial from spike timestamps.
+    Returns
+    -------
+    windowed_units : nested list (3 dimensions)
+        (n_units, n_trials, n_spikes)
+    """
+    assert wstart < wstop
+
+    windowed_units = list()
+    for unit_data in st_data:
+        windowed_spikes = list()
+        for event in event_times:
+            times_mask = np.logical_and(unit_data > (event + wstart), unit_data < (event + wstop)).reshape(-1)
+            if shift:
+                shifted_data = unit_data[times_mask] - (event + wstart)
+            else:
+                shifted_data = unit_data[times_mask]
+            windowed_spikes.append(shifted_data)
+        windowed_units.append(windowed_spikes)
+
+    return windowed_units
