@@ -19,6 +19,7 @@ import torch.nn.functional as F
 import multiprocessing
 from joblib import Parallel, delayed
 import pickle
+import imageio
 num_cores = multiprocessing.cpu_count()
 
 #Simple feedforward ANN for decoding kinematics
@@ -559,3 +560,25 @@ def st_window_split(st_data, event_times, wstart, wstop, shift=True):
         windowed_units.append(windowed_spikes)
 
     return windowed_units
+
+def make_movie(image_folder, output_name, images, fps=30, quality=10):
+    """Turn folder of images into movie.
+    Parameters
+    ----------
+    image_folder : str
+        Path where images are stored.
+    output_name : str
+        Name of video file.
+    images : list of str
+        File names of images stored in `image_folder`.
+        Order of images determines sequence of frames.
+    fps : int | None
+        Frames per second. Default: 30.
+    quality : int | None
+        Quality of output video. Default: 10.
+    """
+    writer = imageio.get_writer(output_name, fps=fps, quality=quality)
+    for filename in images:
+        image_path = str(image_folder) + str(filename)
+        writer.append_data(imageio.imread(image_path))
+    writer.close()
