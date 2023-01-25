@@ -523,43 +523,7 @@ def make_generators(pred_df, neural_df, neural_offset, cv_dict, metadata,
     data_arrays = (training_set, validation_set, testing_set)
     generators = (training_generator, training_eval_generator, validation_generator, testing_generator)
 
-    return data_arrays, generators 
-
-def st_window_split(st_data, event_times, wstart, wstop, shift=True):
-    """ Extract windows from continuous data centered at event_times
-    Parameters
-    ----------
-    data : array like of float (2 dimensions)
-        Data to be split into windows. Recording channels correspond to rows (dim=0),
-        columns (dim=1) correspond to times.
-    event_times : array like of float (1 dimension)
-        Position where windows are centered.
-    wstart : float
-        Start time for window centered at event_times.
-    wstop : float
-        End time for window centered at event_times.
-    shift : bool
-        Option to substract the window start time for each trial from spike timestamps.
-    Returns
-    -------
-    windowed_units : nested list (3 dimensions)
-        (n_units, n_trials, n_spikes)
-    """
-    assert wstart < wstop
-
-    windowed_units = list()
-    for unit_data in st_data:
-        windowed_spikes = list()
-        for event in event_times:
-            times_mask = np.logical_and(unit_data > (event + wstart), unit_data < (event + wstop)).reshape(-1)
-            if shift:
-                shifted_data = unit_data[times_mask] - (event + wstart)
-            else:
-                shifted_data = unit_data[times_mask]
-            windowed_spikes.append(shifted_data)
-        windowed_units.append(windowed_spikes)
-
-    return windowed_units
+    return data_arrays, generators
 
 def make_movie(image_folder, output_name, images, fps=30, quality=10):
     """Turn folder of images into movie.

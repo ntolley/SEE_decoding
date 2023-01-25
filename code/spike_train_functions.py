@@ -51,3 +51,39 @@ def spike_train_rates(unit_data, t_start, t_end, fs, kernel, sampling_period=Non
     rate = rate[:n_samples]
 
     return rate
+
+def st_window_split(st_data, event_times, wstart, wstop, shift=True):
+    """ Extract windows from continuous data centered at event_times
+    Parameters
+    ----------
+    data : array like of float (2 dimensions)
+        Data to be split into windows. Recording channels correspond to rows (dim=0),
+        columns (dim=1) correspond to times.
+    event_times : array like of float (1 dimension)
+        Position where windows are centered.
+    wstart : float
+        Start time for window centered at event_times.
+    wstop : float
+        End time for window centered at event_times.
+    shift : bool
+        Option to substract the window start time for each trial from spike timestamps.
+    Returns
+    -------
+    windowed_units : nested list (3 dimensions)
+        (n_units, n_trials, n_spikes)
+    """
+    assert wstart < wstop
+
+    windowed_units = list()
+    for unit_data in st_data:
+        windowed_spikes = list()
+        for event in event_times:
+            times_mask = np.logical_and(unit_data > (event + wstart), unit_data < (event + wstop)).reshape(-1)
+            if shift:
+                shifted_data = unit_data[times_mask] - (event + wstart)
+            else:
+                shifted_data = unit_data[times_mask]
+            windowed_spikes.append(shifted_data)
+        windowed_units.append(windowed_spikes)
+
+    return windowed_units
