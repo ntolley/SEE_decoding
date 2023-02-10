@@ -1,5 +1,6 @@
 import numpy as np
 import neo
+import scipy
 import scipy.io as sio
 import pandas as pd
 #from externals.SpectralEvents import spectralevents_functions as tse
@@ -42,3 +43,9 @@ def load_ns6_analog(fpath, downsample_rate, from_ns6=True, save=False, channel_s
         lfp_times = np.load(fpath+ f'_lfp_times_{downsample_rate}x_downsample.npy')
 
     return lfp_data, lfp_times
+
+def bandpower(x, fs, fmin, fmax):
+    f, Pxx = scipy.signal.periodogram(x, fs=fs)
+    ind_min = scipy.argmax(f > fmin) - 1
+    ind_max = scipy.argmax(f > fmax) - 1
+    return scipy.trapz(Pxx[ind_min: ind_max], f[ind_min: ind_max])
