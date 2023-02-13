@@ -346,7 +346,7 @@ class SEE_Dataset(torch.utils.data.Dataset):
     #'Characterizes a dataset for PyTorch'
     def __init__(self, cv_dict, fold, partition, kinematic_df, neural_df, offset, window_size, data_step_size, device,
                  kinematic_type='posData', scale_neural=True, scale_kinematics=True, flip_outputs=False,
-                 exclude_neural=None, exclude_kinematic=None, scaler=None):
+                 exclude_neural=None, exclude_kinematic=None, neural_scaler=None, kinematic_scaler=None):
         #'Initialization'
         self.cv_dict = cv_dict
         self.fold = fold
@@ -359,10 +359,21 @@ class SEE_Dataset(torch.utils.data.Dataset):
         self.data_step_size = data_step_size
         self.device = device
         self.posData_list, self.neuralData_list = self.process_dfs(kinematic_df, neural_df)
-        if scaler is None:
-            scaler = StandardScaler()
-
-        self.scaler = scaler
+        if neural_scaler is None:
+            neural_scaler = StandardScaler()
+            if exclude_neural:
+                neural_scaler.fit(np.vstack(self.neuralData_list)[~exclude_neural])
+            else:
+                neural_scaler.fit(np.vstack(self.neuralData_list))
+        self.neural_scaler = neural_scaler
+        
+        if kinematic_scaler is None:
+            kinematic_scaler = StandardScaler()
+            if exclude_kinematic:
+                kinematic_scaler.fit(np.vstack(self.kinematicData_list)[~exclude_kinematic])
+            else:
+                kinematic_scaler.fit(np.vstack(self.kinematicData_list))
+        self.kinematic_scaler = kinematic_scaler
 
         # Boolean array of 1's for features to not be scaled
         if scale_kinematics:
@@ -431,11 +442,11 @@ class SEE_Dataset(torch.utils.data.Dataset):
         scaled_data_list = []
         for data_trial in data_list:
             if exclude_processing is None:
-                scaled_data_trial = self.scaler.fit_transform(data_trial)
+                scaled_data_trial = self.scaler.transform(data_trial)
             else:
                 scaled_data_trial = np.zeros(data_trial.shape)
                 scaled_data_trial[:, exclude_processing] = data_trial[:, exclude_processing]
-                processed_data = self.scaler.fit_transform(data_trial[:, ~exclude_processing])
+                processed_data = self.scaler.transform(data_trial[:, ~exclude_processing])
                 scaled_data_trial[:, ~exclude_processing] = processed_data
             scaled_data_list.append(scaled_data_trial)
 
@@ -505,13 +516,17 @@ def make_generators(pred_df, neural_df, neural_offset, cv_dict, metadata,
                                data_step_size, device, 'posData', scale_neural=scale_neural,
                                scale_kinematics=scale_kinematics, flip_outputs=flip_outputs,
                                exclude_neural=exclude_neural, exclude_kinematic=exclude_kinematics)
+    training_neural_scaler = training_set.neural_scaler
+    training_kinematic_scaler = training_set.kinematic_scaler
+
     training_generator = torch.utils.data.DataLoader(training_set, **train_params)
     training_eval_generator = torch.utils.data.DataLoader(training_set, **train_eval_params)
 
     validation_set = SEE_Dataset(cv_dict, fold, 'validation_idx', pred_df, neural_df, offset, window_size, 
                                  data_step_size, device, 'posData', scale_neural=scale_neural,
                                  scale_kinematics=scale_kinematics, flip_outputs=flip_outputs,
-                                 exclude_neural=exclude_neural, exclude_kinematic=exclude_kinematics)
+                                 exclude_neural=exclude_neural, exclude_kinematic=exclude_kinematics,
+                                 scaler=training_scaler)
     validation_generator = torch.utils.data.DataLoader(validation_set, **validation_params)
 
     testing_set = SEE_Dataset(cv_dict, fold, 'test_idx', pred_df, neural_df, offset, window_size, 
