@@ -361,26 +361,26 @@ class SEE_Dataset(torch.utils.data.Dataset):
         self.posData_list, self.neuralData_list = self.process_dfs(kinematic_df, neural_df)
         if neural_scaler is None:
             neural_scaler = StandardScaler()
-            if exclude_neural:
-                neural_scaler.fit(np.vstack(self.neuralData_list)[~exclude_neural])
+            if exclude_neural is not None:
+                neural_scaler.fit(np.vstack(self.neuralData_list)[:, ~exclude_neural])
             else:
                 neural_scaler.fit(np.vstack(self.neuralData_list))
         self.neural_scaler = neural_scaler
         
         if kinematic_scaler is None:
             kinematic_scaler = StandardScaler()
-            if exclude_kinematic:
-                kinematic_scaler.fit(np.vstack(self.kinematicData_list)[~exclude_kinematic])
+            if exclude_kinematic is not None:
+                kinematic_scaler.fit(np.vstack(self.posData_list)[:, ~exclude_kinematic])
             else:
-                kinematic_scaler.fit(np.vstack(self.kinematicData_list))
+                kinematic_scaler.fit(np.vstack(self.posData_list))
         self.kinematic_scaler = kinematic_scaler
 
         # Boolean array of 1's for features to not be scaled
         if scale_kinematics:
-            self.posData_list = self.transform_data(self.posData_list, exclude_kinematic)
+            self.posData_list = self.transform_data(self.posData_list, self.kinematic_scaler, exclude_kinematic)
         
         if scale_neural:
-            self.neuralData_list = self.transform_data(self.neuralData_list, exclude_neural)
+            self.neuralData_list = self.transform_data(self.neuralData_list, self.neural_scaler, exclude_neural)
 
         self.kinematic_type = kinematic_type
         self.split_offset = np.round((self.offset/self.data_step_size) / 2).astype(int)
@@ -436,25 +436,25 @@ class SEE_Dataset(torch.utils.data.Dataset):
         return X_tensor, y_tensor
 
     #Zero mean and unit std
-    def transform_data(self, data_list, exclude_processing):
+    def transform_data(self, data_list, scaler, exclude_processing):
         #Iterate over trials and apply normalization
      
         scaled_data_list = []
         for data_trial in data_list:
             if exclude_processing is None:
-                scaled_data_trial = self.scaler.transform(data_trial)
+                scaled_data_trial = scaler.transform(data_trial)
             else:
                 scaled_data_trial = np.zeros(data_trial.shape)
                 scaled_data_trial[:, exclude_processing] = data_trial[:, exclude_processing]
-                processed_data = self.scaler.transform(data_trial[:, ~exclude_processing])
+                processed_data = scaler.transform(data_trial[:, ~exclude_processing])
                 scaled_data_trial[:, ~exclude_processing] = processed_data
             scaled_data_list.append(scaled_data_trial)
 
         return scaled_data_list
 
 # Utility function to load dataframes of preprocessed kinematic/neural data
-def load_mocap_df(data_path):
-    kinematic_df = pd.read_pickle(data_path + 'kinematic_df.pkl')
+def load_mocap_df(data_path, kinematic_suffix=None):
+    kinematic_df = pd.read_pickle(f'{data_path}kinematic_df{kinematic_suffix}.pkl')
     neural_df = pd.read_pickle(data_path + 'neural_df.pkl')
 
     # read python dict back from the file
@@ -491,7 +491,8 @@ def evaluate_model(model, generator, device):
     return y_pred
 
 def make_generators(pred_df, neural_df, neural_offset, cv_dict, metadata,
-                    exclude_neural=None, exclude_kinematics=None, window_size=1, device='cpu'):
+                    exclude_neural=None, exclude_kinematics=None, window_size=1, 
+                    flip_outputs=False, device='cpu'):
     sampling_rate = 100
     kernel_offset = int(metadata['kernel_halfwidth'] * sampling_rate)  #Convolution kernel centered at zero, add to neural offset
     offset = neural_offset + kernel_offset
@@ -509,7 +510,7 @@ def make_generators(pred_df, neural_df, neural_offset, cv_dict, metadata,
 
     scale_neural = True
     scale_kinematics = True
-    flip_outputs=True
+    flip_outputs=flip_outputs
 
     # Generators
     training_set = SEE_Dataset(cv_dict, fold, 'train_idx', pred_df, neural_df, offset, window_size, 
@@ -526,13 +527,14 @@ def make_generators(pred_df, neural_df, neural_offset, cv_dict, metadata,
                                  data_step_size, device, 'posData', scale_neural=scale_neural,
                                  scale_kinematics=scale_kinematics, flip_outputs=flip_outputs,
                                  exclude_neural=exclude_neural, exclude_kinematic=exclude_kinematics,
-                                 scaler=training_scaler)
+                                 neural_scaler=training_neural_scaler, kinematic_scaler=training_kinematic_scaler)
     validation_generator = torch.utils.data.DataLoader(validation_set, **validation_params)
 
     testing_set = SEE_Dataset(cv_dict, fold, 'test_idx', pred_df, neural_df, offset, window_size, 
                               data_step_size, device, 'posData', scale_neural=scale_neural,
                               scale_kinematics=scale_kinematics, flip_outputs=flip_outputs,
-                              exclude_neural=exclude_neural, exclude_kinematic=exclude_kinematics)
+                              exclude_neural=exclude_neural, exclude_kinematic=exclude_kinematics,
+                              neural_scaler=training_neural_scaler, kinematic_scaler=training_kinematic_scaler)
     testing_generator = torch.utils.data.DataLoader(testing_set, **test_params)
 
     data_arrays = (training_set, validation_set, testing_set)
