@@ -492,7 +492,7 @@ def evaluate_model(model, generator, device):
 
 def make_generators(pred_df, neural_df, neural_offset, cv_dict, metadata,
                     exclude_neural=None, exclude_kinematics=None, window_size=1, 
-                    flip_outputs=False, fold=0, device='cpu',):
+                    flip_outputs=False, fold=0, batch_size=10000, device='cpu',):
     sampling_rate = 100
     kernel_offset = int(metadata['kernel_halfwidth'] * sampling_rate)  #Convolution kernel centered at zero, add to neural offset
     offset = neural_offset + kernel_offset
@@ -501,7 +501,6 @@ def make_generators(pred_df, neural_df, neural_offset, cv_dict, metadata,
     # Set up PyTorch Dataloaders
     
     # Parameters
-    batch_size = 10000
     train_params = {'batch_size': batch_size, 'shuffle': True, 'num_workers': num_cores, 'pin_memory':False}
     train_eval_params = {'batch_size': batch_size, 'shuffle': False, 'num_workers': num_cores, 'pin_memory':False}
     validation_params = {'batch_size': batch_size, 'shuffle': True, 'num_workers': num_cores, 'pin_memory':False}
