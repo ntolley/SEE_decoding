@@ -408,12 +408,6 @@ class SEE_Dataset(torch.utils.data.Dataset):
         return posData_list, neuralData_list
 
     def format_splits(self, data_list):
-        # data_tensor = torch.from_numpy(
-        #     np.concatenate(
-        #         [np.pad(data_list[trial], ((self.window_size, self.window_size),(0,0)), mode='constant') for trial in range(self.num_trials)]
-        #         )  
-        #     ).unfold(0, self.window_size, self.data_step_size).transpose(1,2)
-
         unfolded_data_list = list()
         for trial_idx in range(self.num_trials):
             unfolded_trial = torch.from_numpy(data_list[trial_idx]).unfold(0, self.window_size, self.data_step_size).transpose(1, 2)
@@ -561,3 +555,86 @@ def make_movie(image_folder, output_name, images, fps=30, quality=10):
         image_path = str(image_folder) + str(filename)
         writer.append_data(imageio.imread(image_path))
     writer.close()
+
+#GRU architecture for decoding kinematics
+class model_gru_categorical(nn.Module):
+    def __init__(self, input_size, output_size, hidden_dim, n_layers, dropout, device, bidirectional=False,
+                 cat_features=None):
+        super(model_gru, self).__init__()
+
+        #multiplier based on bidirectional parameter
+        if bidirectional:
+            num_directions = 2
+        else:
+            num_directions = 1
+
+        # Defining some parameters
+        self.hidden_dim = hidden_dim       
+        self.n_layers = n_layers * num_directions
+        self.device = device
+        self.dropout = dropout
+        self.bidirectional = bidirectional
+        self.cat_features = cat_features
+        self.input_size = input_size
+
+        if self.cat_features is not None:
+            self.num_cat_features = np.sum(self.cat_features).astype(int)
+            self.hidden_fc = nn.Linear(self.num_cat_features, self.hidden_dim)
+
+            self.input_size = self.input_size - self.num_cat_features
+            # self.fc1 = nn.Linear((self.hidden_dim* num_directions) + self.num_cat_features, self.hidden_dim)
+
+            
+        else:
+            self.fc = nn.Linear(self.hidden_dim * num_directions, output_size)
+        #     self.fc1 = nn.Linear((self.hidden_dim* num_directions), self.hidden_dim)
+        # self.fc2 = nn.Linear(self.hidden_dim, output_size)
+
+        self.fc = nn.Linear((self.hidden_dim* num_directions), output_size)
+        self.gru = nn.GRU(self.input_size, self.hidden_dim, n_layers, batch_first=True, dropout=dropout, bidirectional=bidirectional) 
+
+      
+
+        #Defining the layers
+    
+    def forward(self, x):
+        batch_size = x.size(0)
+        # Initializing hidden state for first input using method defined below
+        hidden = self.init_hidden(batch_size)
+
+        # Passing in the input and hidden state into the model and obtaining outputs
+        if self.cat_features is not None:
+            cat_hidden = self.hidden_fc(torch.tanh(x[:, -1, self.cat_features]))
+            hidden = hidden + cat_hidden
+            out, hidden = self.gru(x[:, :, ~self.cat_features], hidden)
+            out = out.contiguous()
+            # out = torch.cat([out, x[:, :, self.cat_features]], 2)
+
+        else:
+            out, hidden = self.gru(x, hidden)
+            out = out.contiguous()
+        
+        out = self.fc(out)
+        # out = self.fc1(torch.tanh(out))
+        # out = self.fc2(out)
+             
+        # if self.cat_features is not None:
+        # #     out = torch.cat([out, x[:, :, self.cat_features]], 2)
+        # out = self.fc1(torch.tanh(out))
+        # out = self.fc2(out)
+
+
+        return out
+    
+    def init_hidden(self, batch_size):
+        # weight = next(self.parameters()).data
+        # a = weight.new(self.n_layers, batch_size, 1).normal_(-1,1)
+        # b = weight.new(self.n_layers, batch_size, self.hidden_dim-1).zero_()  
+        # return torch.autograd.Variable(torch.cat([a,b], 2))
+
+        weight = next(self.parameters()).data.to(self.device)
+
+        #GRU initialization
+        hidden = weight.new(self.n_layers, batch_size, self.hidden_dim).zero_().to(self.device)
+
+        return hidden
