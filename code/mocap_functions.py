@@ -265,6 +265,7 @@ def train_validate_test_model(model, optimizer, criterion, max_epochs, training_
             batch_y = batch_y.float().to(device)
             output = model(batch_x)
             train_loss = criterion(output[:,-1,:], batch_y[:,-1,:])
+            # train_loss = criterion(output[:,:,:], batch_y[:,:,:])
             train_loss.backward() # Does backpropagation and calculates gradients
             optimizer.step() # Updates the weights accordingly
 
@@ -410,7 +411,13 @@ class SEE_Dataset(torch.utils.data.Dataset):
     def format_splits(self, data_list):
         unfolded_data_list = list()
         for trial_idx in range(self.num_trials):
-            unfolded_trial = torch.from_numpy(data_list[trial_idx]).unfold(0, self.window_size, self.data_step_size).transpose(1, 2)
+            if self.window_size == 1:
+                padded_trial = torch.from_numpy(data_list[trial_idx])
+            else:
+                padded_trial = torch.nn.functional.pad(
+                    torch.from_numpy(data_list[trial_idx].T), pad=(self.window_size, 0)).transpose(0, 1)
+            
+            unfolded_trial = padded_trial.unfold(0, self.window_size, self.data_step_size).transpose(1, 2)
             unfolded_data_list.append(unfolded_trial)
         
         data_tensor = torch.concat(unfolded_data_list, axis=0)
